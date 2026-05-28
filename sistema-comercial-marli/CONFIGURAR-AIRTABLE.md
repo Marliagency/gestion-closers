@@ -2,7 +2,7 @@
 
 Esta guía termina de configurar la base `Sistema Comercial Marli` (`appyGM3EfHjhWrEAO`). Tu base ya trae las tres tablas (**Equipo**, **Productos**, **Leads**) con datos de ejemplo. Aquí montamos los enlaces que hacen que el closer se rellene solo, los campos calculados del ranking y las tres vistas operativas.
 
-Tiempo estimado: 25-35 minutos.
+Tiempo estimado: 25-35 minutos a mano. Si prefieres ir más rápido, los pasos 1-5 y los enlaces de pareja están automatizados en `scripts/setup-airtable.py` (ver sección **Vía rápida** al final).
 
 ---
 
@@ -204,3 +204,55 @@ Antes de soltar al equipo, comprueba:
 - [ ] Los 10k leads fríos están repartidos en lotes y parejas tras correr el script.
 
 Si los seis puntos pasan, el sistema está listo. Pasa al archivo `AUTOMATIZACIONES.md`.
+
+---
+
+## Vía rápida: `scripts/setup-airtable.py`
+
+Si prefieres no hacer los pasos 1-5 a mano, el script automatiza la creación de campos, lookups, fórmulas y el enlace setter→closer. Ejecútalo desde **tu máquina** (no desde el entorno de Claude Code, que tiene bloqueada la salida a `api.airtable.com`).
+
+### Prerrequisitos
+- Python 3.8 o superior. Sin dependencias externas.
+- Un Personal Access Token con scopes `data.records:read/write` y `schema.bases:read/write`, con acceso solo a la base `appyGM3EfHjhWrEAO`.
+
+### Pasos
+
+```bash
+git clone <repo> && cd gestion-closers
+export AIRTABLE_TOKEN=patXXXXXXXXXXXXXX
+
+# 1. Inspecciona el schema actual (sin tocar nada)
+python3 scripts/setup-airtable.py inspect
+
+# 2. Crea todos los campos (idempotente: si existen los respeta)
+python3 scripts/setup-airtable.py configure
+
+# 3. Enlaza Lucía → Diego y Marta → Sara
+python3 scripts/setup-airtable.py link-pairs
+
+# (o todo de golpe)
+python3 scripts/setup-airtable.py all
+```
+
+Flags útiles:
+- `--dry-run` para ver qué haría sin escribir nada.
+- `--verbose` para ver los payloads y respuestas de la API.
+- `--base-id <id>` si quieres apuntar a una base distinta.
+
+### Qué hace y qué no
+
+| Paso | Automatizado por el script | A mano en UI |
+|---|---|---|
+| 1. `Closer asignado` en Equipo | ✅ | — |
+| 2. `Setter` en Leads | ✅ | — |
+| 3. `Closer derivado` (lookup) | ✅ | — |
+| 4. Lookups Producto + fórmulas de comisión | ✅ | — |
+| 5. Campos `Lote`, `Pareja asignada`, `Proximo seguimiento`, `Fecha ultimo cambio`, `Dias sin tocar`, `Ficha completa` | ✅ | — |
+| Enlazar Lucía→Diego y Marta→Sara | ✅ (`link-pairs`) | — |
+| 6. Vistas Kanban / Marcador / Ficha | ❌ (la API no crea vistas) | ✅ |
+| 7. Summary functions del ranking | ❌ | ✅ |
+| 8. Reparto round-robin de los 10k | ❌ (mejor en Airtable Scripting) | ✅ |
+| 9. Permisos del equipo | ❌ | ✅ |
+
+Tiempo real con el script: ~2 min de ejecución + 10 min para crear vistas y compartir.
+
