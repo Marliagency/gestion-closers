@@ -1,0 +1,6 @@
+id,nombre,rol,closer_asignado_id,email,comision_pct,activo
+E001,Lucia Garcia,setter,E003,lucia@marli.ai,5,si
+E002,Marta Ruiz,setter,E004,marta@marli.ai,5,si
+E003,Diego Lopez,closer,,diego@marli.ai,15,si
+E004,Sara Molina,closer,,sara@marli.ai,15,si
+E005,Jose Marin,closer,,jose@marli.ai,10,si
