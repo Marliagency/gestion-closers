@@ -1,17 +1,23 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 """
 setup-airtable.py — Configura la base "Sistema Comercial Marli" en Airtable.
+
+Compatible con Python 2.7 (macOS Mojave, /usr/bin/python) y Python 3.6+.
+Sin dependencias externas: solo stdlib.
 
 Pensado para ejecutarse desde TU máquina (no desde el entorno de Claude Code,
 que tiene bloqueada la salida a api.airtable.com).
 
 Uso:
 
-    export AIRTABLE_TOKEN=patXXXXXXXX
-    python3 scripts/setup-airtable.py inspect            # vuelca el schema actual
-    python3 scripts/setup-airtable.py configure          # crea links, lookups y fórmulas
-    python3 scripts/setup-airtable.py link-pairs         # enlaza Lucía→Diego, Marta→Sara
-    python3 scripts/setup-airtable.py all                # configure + link-pairs
+    export AIRTABLE_TOKEN=patXXXXXXXX.YYYY...
+    python scripts/setup-airtable.py inspect            # vuelca el schema actual
+    python scripts/setup-airtable.py configure          # crea links, lookups y fórmulas
+    python scripts/setup-airtable.py link-pairs         # enlaza Lucía→Diego, Marta→Sara
+    python scripts/setup-airtable.py all                # configure + link-pairs
+
+(En Mac/Linux modernos también funciona `python3 scripts/setup-airtable.py …`.)
 
 Opcional:
     --base-id appyGM3EfHjhWrEAO     (por defecto)
@@ -26,65 +32,68 @@ Requisitos del PAT:
 Idempotente: si un campo ya existe con el mismo nombre, lo respeta y no lo recrea.
 """
 
+from __future__ import print_function, unicode_literals
+
 import argparse
 import json
 import os
 import sys
-import urllib.error
-import urllib.request
+
+try:  # Python 3
+    from urllib.request import Request, urlopen
+    from urllib.error import HTTPError
+except ImportError:  # Python 2
+    from urllib2 import Request, urlopen, HTTPError
 
 API = "https://api.airtable.com/v0"
 BASE_ID_DEFAULT = "appyGM3EfHjhWrEAO"
 
 
-def req(method: str, path: str, body=None, token=None, verbose=False):
-    url = f"{API}{path}"
-    data = json.dumps(body).encode() if body is not None else None
-    r = urllib.request.Request(url, data=data, method=method)
-    r.add_header("Authorization", f"Bearer {token}")
+def req(method, path, body=None, token=None, verbose=False):
+    url = API + path
+    data = json.dumps(body).encode("utf-8") if body is not None else None
+    r = Request(url, data=data)
+    r.get_method = lambda: method
+    r.add_header("Authorization", "Bearer " + token)
     if body is not None:
         r.add_header("Content-Type", "application/json")
     if verbose:
-        print(f">>> {method} {path}")
+        print(">>> {0} {1}".format(method, path))
         if body is not None:
             print(json.dumps(body, indent=2, ensure_ascii=False))
     try:
-        with urllib.request.urlopen(r) as resp:
-            payload = json.loads(resp.read() or b"{}")
-            if verbose:
-                print("<<<", json.dumps(payload, indent=2, ensure_ascii=False)[:500])
-            return payload
-    except urllib.error.HTTPError as e:
+        resp = urlopen(r)
+        raw = resp.read()
+        payload = json.loads(raw.decode("utf-8")) if raw else {}
+        if verbose:
+            print("<<<", json.dumps(payload, indent=2, ensure_ascii=False)[:500])
+        return payload
+    except HTTPError as e:
         msg = e.read().decode("utf-8", "replace")
-        print(f"ERROR {e.code} {method} {path}\n{msg}", file=sys.stderr)
-        raise SystemExit(2)
-
-
-def find(items, **kw):
-    for it in items:
-        if all(it.get(k) == v for k, v in kw.items()):
-            return it
-    return None
+        print("ERROR {0} {1} {2}\n{3}".format(e.code, method, path, msg),
+              file=sys.stderr)
+        sys.exit(2)
 
 
 def find_ci(items, name_key, name):
     for it in items:
-        if it.get(name_key, "").lower() == name.lower():
+        if (it.get(name_key) or "").lower() == name.lower():
             return it
     return None
 
 
 def fetch_schema(base_id, token, verbose=False):
-    return req("GET", f"/meta/bases/{base_id}/tables", token=token, verbose=verbose)["tables"]
+    return req("GET", "/meta/bases/{0}/tables".format(base_id),
+               token=token, verbose=verbose)["tables"]
 
 
 def list_records(base_id, table_id, token, verbose=False):
     out = []
     offset = None
     while True:
-        path = f"/{base_id}/{table_id}?pageSize=100"
+        path = "/{0}/{1}?pageSize=100".format(base_id, table_id)
         if offset:
-            path += f"&offset={offset}"
+            path += "&offset=" + offset
         page = req("GET", path, token=token, verbose=verbose)
         out.extend(page.get("records", []))
         offset = page.get("offset")
@@ -99,13 +108,13 @@ def list_records(base_id, table_id, token, verbose=False):
 def cmd_inspect(args, token):
     tables = fetch_schema(args.base_id, token, args.verbose)
     for t in tables:
-        print(f"\n## {t['name']}  ({t['id']})")
+        print("\n## {0}  ({1})".format(t["name"], t["id"]))
         for f in t["fields"]:
             opts = f.get("options") or {}
             extra = ""
             if f["type"] in ("multipleRecordLinks", "multipleLookupValues"):
-                extra = f"  ⟶ {opts}"
-            print(f"  - {f['name']:<30} {f['type']:<25}{extra}")
+                extra = "  -> " + json.dumps(opts, ensure_ascii=False)
+            print("  - {0:<30} {1:<25}{2}".format(f["name"], f["type"], extra))
 
 
 # ---------------------------------------------------------------------------
@@ -115,14 +124,16 @@ def cmd_inspect(args, token):
 def create_field(base_id, table, body, token, dry_run, verbose):
     existing = find_ci(table["fields"], "name", body["name"])
     if existing:
-        print(f"  ✓ '{body['name']}' ya existe ({existing['id']}, tipo {existing['type']})")
+        print("  [ya] '{0}' existe ({1}, tipo {2})".format(
+            body["name"], existing["id"], existing["type"]))
         return existing
     if dry_run:
-        print(f"  [dry-run] crearía '{body['name']}' ({body['type']})")
+        print("  [dry-run] crearia '{0}' ({1})".format(body["name"], body["type"]))
         return None
-    new = req("POST", f"/meta/bases/{base_id}/tables/{table['id']}/fields",
+    new = req("POST",
+              "/meta/bases/{0}/tables/{1}/fields".format(base_id, table["id"]),
               body=body, token=token, verbose=verbose)
-    print(f"  + '{body['name']}' creado ({new['id']})")
+    print("  [+] '{0}' creado ({1})".format(body["name"], new["id"]))
     table["fields"].append(new)
     return new
 
@@ -136,23 +147,29 @@ def cmd_configure(args, token):
     t_leads = find_ci(tables, "name", "Leads")
     if not (t_equipo and t_productos and t_leads):
         print("ERROR: faltan tablas Equipo / Productos / Leads", file=sys.stderr)
-        raise SystemExit(2)
+        sys.exit(2)
 
-    print(f"  Equipo:    {t_equipo['id']}")
-    print(f"  Productos: {t_productos['id']}")
-    print(f"  Leads:     {t_leads['id']}")
+    print("  Equipo:    " + t_equipo["id"])
+    print("  Productos: " + t_productos["id"])
+    print("  Leads:     " + t_leads["id"])
 
     # -------------------- EQUIPO --------------------
     print("\n== Equipo: autoenlace Closer asignado ==")
-    f_closer_asignado = create_field(args.base_id, t_equipo, {
+    create_field(args.base_id, t_equipo, {
         "name": "Closer asignado",
         "type": "multipleRecordLinks",
         "options": {
             "linkedTableId": t_equipo["id"],
             "prefersSingleRecordLink": True,
         },
-        "description": "Cada setter enlaza aquí a su closer (single).",
+        "description": "Cada setter enlaza aqui a su closer (single).",
     }, token, args.dry_run, args.verbose)
+
+    # Re-fetch para tener el id real del nuevo Closer asignado
+    tables = fetch_schema(args.base_id, token, args.verbose)
+    t_equipo = find_ci(tables, "name", "Equipo")
+    t_productos = find_ci(tables, "name", "Productos")
+    t_leads = find_ci(tables, "name", "Leads")
 
     # -------------------- LEADS: links --------------------
     print("\n== Leads: link Setter ==")
@@ -174,13 +191,20 @@ def cmd_configure(args, token):
             "linkedTableId": t_productos["id"],
             "prefersSingleRecordLink": True,
         },
-        "description": "Producto vendido (vacío hasta el cierre).",
+        "description": "Producto vendido (vacio hasta el cierre).",
     }, token, args.dry_run, args.verbose)
+
+    # Re-fetch otra vez para tener los ids de Setter y Producto si se crearon ahora
+    tables = fetch_schema(args.base_id, token, args.verbose)
+    t_equipo = find_ci(tables, "name", "Equipo")
+    t_productos = find_ci(tables, "name", "Productos")
+    t_leads = find_ci(tables, "name", "Leads")
+    f_setter = find_ci(t_leads["fields"], "name", "Setter")
+    f_producto = find_ci(t_leads["fields"], "name", "Producto")
 
     # -------------------- LEADS: lookups via Setter --------------------
     if f_setter:
         print("\n== Leads: lookup Closer derivado ==")
-        # localiza el id del campo 'Closer asignado' en Equipo (puede ser nuevo)
         eq_closer = find_ci(t_equipo["fields"], "name", "Closer asignado")
         if eq_closer:
             create_field(args.base_id, t_leads, {
@@ -193,11 +217,9 @@ def cmd_configure(args, token):
                 "description": "Closer al que va este lead. Se rellena solo desde el setter.",
             }, token, args.dry_run, args.verbose)
 
-        # lookup comision_pct del setter
-        eq_comision = find_ci(t_equipo["fields"], "name", "comision_pct") \
-            or find_ci(t_equipo["fields"], "name", "Comision pct") \
-            or find_ci(t_equipo["fields"], "name", "Comisión") \
-            or find_ci(t_equipo["fields"], "name", "comision")
+        eq_comision = (find_ci(t_equipo["fields"], "name", "comision_pct")
+                       or find_ci(t_equipo["fields"], "name", "Comision pct")
+                       or find_ci(t_equipo["fields"], "name", "comision"))
         if eq_comision:
             print("\n== Leads: lookup Comision_pct_setter ==")
             create_field(args.base_id, t_leads, {
@@ -209,28 +231,24 @@ def cmd_configure(args, token):
                 },
             }, token, args.dry_run, args.verbose)
         else:
-            print("  (!) No encuentro 'comision_pct' en Equipo. Crea ese campo a mano (% con 0..1) y vuelve a correr.")
+            print("  (!) No encuentro 'comision_pct' en Equipo. Crea ese campo a mano (0..1).")
 
     # -------------------- LEADS: lookups via Producto --------------------
     if f_producto:
-        # Detectar nombres reales en Productos
         prod_fields = t_productos["fields"]
-        prod_precio = find_ci(prod_fields, "name", "precio") or find_ci(prod_fields, "name", "Precio")
-        prod_coste = find_ci(prod_fields, "name", "coste_agencia") \
-            or find_ci(prod_fields, "name", "coste agencia") \
-            or find_ci(prod_fields, "name", "Coste agencia") \
-            or find_ci(prod_fields, "name", "coste")
-        prod_margen = find_ci(prod_fields, "name", "margen") or find_ci(prod_fields, "name", "Margen")
+        prod_precio = find_ci(prod_fields, "name", "precio")
+        prod_coste = (find_ci(prod_fields, "name", "coste_agencia")
+                      or find_ci(prod_fields, "name", "coste agencia")
+                      or find_ci(prod_fields, "name", "coste"))
+        prod_margen = find_ci(prod_fields, "name", "margen")
 
-        for label, src in [
-            ("Precio", prod_precio),
-            ("Coste agencia", prod_coste),
-            ("Margen", prod_margen),
-        ]:
+        for label, src in (("Precio", prod_precio),
+                           ("Coste agencia", prod_coste),
+                           ("Margen", prod_margen)):
             if not src:
-                print(f"  (!) No encuentro '{label}' en Productos; saltando lookup.")
+                print("  (!) No encuentro '{0}' en Productos; salto.".format(label))
                 continue
-            print(f"\n== Leads: lookup {label} ==")
+            print("\n== Leads: lookup {0} ==".format(label))
             create_field(args.base_id, t_leads, {
                 "name": label,
                 "type": "multipleLookupValues",
@@ -240,13 +258,13 @@ def cmd_configure(args, token):
                 },
             }, token, args.dry_run, args.verbose)
 
-    # -------------------- LEADS: campos de gestión --------------------
+    # -------------------- LEADS: campos auxiliares --------------------
     print("\n== Leads: campos auxiliares ==")
     create_field(args.base_id, t_leads, {
         "name": "Lote",
         "type": "number",
         "options": {"precision": 0},
-        "description": "Cohorte del lead frío (1..N, ~500 por lote).",
+        "description": "Cohorte del lead frio (1..N, ~500 por lote).",
     }, token, args.dry_run, args.verbose)
 
     create_field(args.base_id, t_leads, {
@@ -271,14 +289,19 @@ def cmd_configure(args, token):
         "options": {
             "isValid": True,
             "referencedFieldIds": None,
-            "result": {"type": "dateTime", "options": {"dateFormat": {"format": "YYYY-MM-DD", "name": "iso"},
-                                                       "timeFormat": {"format": "HH:mm", "name": "24hour"},
-                                                       "timeZone": "Europe/Madrid"}},
+            "result": {
+                "type": "dateTime",
+                "options": {
+                    "dateFormat": {"format": "YYYY-MM-DD", "name": "iso"},
+                    "timeFormat": {"format": "HH:mm", "name": "24hour"},
+                    "timeZone": "Europe/Madrid",
+                },
+            },
         },
     }, token, args.dry_run, args.verbose)
 
-    # -------------------- LEADS: fórmulas --------------------
-    print("\n== Leads: fórmulas (comisiones y métricas) ==")
+    # -------------------- LEADS: formulas --------------------
+    print("\n== Leads: formulas (comisiones y metricas) ==")
 
     formulas = [
         ("Comision setter",
@@ -287,8 +310,6 @@ def cmd_configure(args, token):
          "IF({Estado}='cerrado', IF({Margen}, {Margen}, 0) * 0.15, 0)"),
         ("Bonus mantenimiento closer",
          "IF(AND({Estado}='cerrado', {Mantenimiento}), 50, 0)"),
-        ("Ficha completa",
-         "IF(AND({Dolor detectado}, {Num pacientes}, {Objecion anticipada}, {Fecha videollamada}), '✅', '❌')"),
         ("Dias sin tocar",
          "DATETIME_DIFF(NOW(), {Fecha ultimo cambio}, 'days')"),
     ]
@@ -300,50 +321,62 @@ def cmd_configure(args, token):
         }, token, args.dry_run, args.verbose)
 
     print("\n== Listo. ==")
-    print("Pendiente a mano (la API no lo permite o es más rápido en UI):")
-    print("  · Crear vistas Kanban + Grid agrupada + Form/Grid de ficha.")
-    print("  · Subir los 10k leads y correr el script round-robin en Airtable Scripting.")
-    print("  · Compartir la base con el equipo.")
+    print("Pendiente a mano (no automatizable via API):")
+    print("  - Crear vistas Kanban + Grid agrupada + Ficha.")
+    print("  - Subir los 10k leads y correr el script round-robin en Airtable Scripting.")
+    print("  - Compartir la base con el equipo.")
 
 
 # ---------------------------------------------------------------------------
 # COMMAND: link-pairs
 # ---------------------------------------------------------------------------
 
-PAIRS = [("Lucía", "Diego"), ("Lucia", "Diego"), ("Marta", "Sara")]
+PAIRS = [("Lucia", "Diego"), ("Marta", "Sara")]
 
 
 def cmd_link_pairs(args, token):
-    print("== Enlazando setter → closer en Equipo ==")
+    print("== Enlazando setter -> closer en Equipo ==")
     tables = fetch_schema(args.base_id, token, args.verbose)
     t_equipo = find_ci(tables, "name", "Equipo")
     if not t_equipo:
-        raise SystemExit("Falta tabla Equipo")
+        print("Falta tabla Equipo", file=sys.stderr)
+        sys.exit(2)
     f_closer = find_ci(t_equipo["fields"], "name", "Closer asignado")
     if not f_closer:
-        raise SystemExit("Crea primero el campo 'Closer asignado' (corre `configure`).")
+        print("Crea primero 'Closer asignado' (corre `configure`).", file=sys.stderr)
+        sys.exit(2)
 
-    name_field = next((f for f in t_equipo["fields"]
-                       if f.get("type") == "singleLineText"
-                       and "nombre" in f["name"].lower()), None) \
-        or t_equipo["fields"][0]  # fallback al primary
+    name_field = None
+    for f in t_equipo["fields"]:
+        if f.get("type") == "singleLineText" and "nombre" in f["name"].lower():
+            name_field = f
+            break
+    if name_field is None:
+        name_field = t_equipo["fields"][0]
 
     records = list_records(args.base_id, t_equipo["id"], token, args.verbose)
-    by_name = {(r["fields"].get(name_field["name"]) or "").lower(): r for r in records}
+    by_name = {}
+    for r in records:
+        n = (r["fields"].get(name_field["name"]) or "").lower()
+        # quita acentos basicos para que "lucía" matchee "lucia"
+        n = (n.replace("á", "a").replace("é", "e").replace("í", "i")
+              .replace("ó", "o").replace("ú", "u"))
+        by_name[n] = r
 
     for setter, closer in PAIRS:
         s = by_name.get(setter.lower())
         c = by_name.get(closer.lower())
         if not s or not c:
-            print(f"  (!) No encuentro {setter} o {closer}; salto.")
+            print("  (!) No encuentro {0} o {1}; salto.".format(setter, closer))
             continue
         if args.dry_run:
-            print(f"  [dry-run] {setter} → {closer}")
+            print("  [dry-run] {0} -> {1}".format(setter, closer))
             continue
-        req("PATCH", f"/{args.base_id}/{t_equipo['id']}/{s['id']}",
+        req("PATCH",
+            "/{0}/{1}/{2}".format(args.base_id, t_equipo["id"], s["id"]),
             body={"fields": {"Closer asignado": [c["id"]]}},
             token=token, verbose=args.verbose)
-        print(f"  ✓ {setter} → {closer}")
+        print("  [+] {0} -> {1}".format(setter, closer))
 
 
 # ---------------------------------------------------------------------------
@@ -361,7 +394,7 @@ def main():
     token = os.environ.get("AIRTABLE_TOKEN")
     if not token:
         print("Define AIRTABLE_TOKEN en el entorno.", file=sys.stderr)
-        raise SystemExit(1)
+        sys.exit(1)
 
     if args.command == "inspect":
         cmd_inspect(args, token)
