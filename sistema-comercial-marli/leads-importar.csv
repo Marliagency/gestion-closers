@@ -1,7 +1,0 @@
-id_lead,nombre_psicologo,contacto,estado,setter_id,closer_id_derivado,dolor_detectado,num_pacientes,objecion_anticipada,fecha_videollamada,producto,euros_cobrado,mantenimiento,fecha_ultimo_cambio
-L001,Ana Fernandez,ana.fernandez@clinica.es,frio,E001,E003,,,,,,,no,2026-05-20
-L002,Carlos Vega,carlos.vega@psico.com,contactado,E001,E003,Pierde horas con informes,35,No tengo tiempo de aprender,,,,no,2026-05-22
-L003,Beatriz Soto,+34611223344,cita agendada,E002,E004,Saturada de pacientes nuevos,60,Es caro,2026-06-02 17:00,Chatbot IA,,no,2026-05-25
-L004,Hugo Pardo,hugo.pardo@gabinete.es,presentado,E002,E004,Quiere automatizar informes,45,Prefiere pensarlo,2026-05-26 18:30,Automatizacion Informes,,no,2026-05-26
-L005,Laura Mendez,laura.mendez@psicologa.es,cerrado,E001,E003,Necesita escalar consulta online,80,Ya probo otra herramienta,2026-05-15 19:00,Pack Premium,1349,si,2026-05-15
-L006,Raul Iglesias,raul.iglesias@mail.com,perdido,E005,E005,No ve el ROI claro,20,No cree en la IA,2026-05-10 17:30,Automatizacion Informes,,no,2026-05-12
